@@ -51,14 +51,20 @@ before offering your own considered view. Cite philosophers and works by name.""
 # ---------------------------------------------------------------------------
 
 anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-composio = Composio(
-    api_key=os.getenv("COMPOSIO_API_KEY"),
-    provider=AnthropicProvider(),
-)
+
+_composio_api_key = os.getenv("COMPOSIO_API_KEY")
+composio: Optional[Composio] = None
+if _composio_api_key:
+    composio = Composio(
+        api_key=_composio_api_key,
+        provider=AnthropicProvider(),
+    )
 
 # Fetch tools useful for a philosophy agent (web search, Wikipedia lookups, etc.)
 # Falls back to an empty list if no tools are available for the user.
 def get_tools() -> list:
+    if not composio:
+        return []
     try:
         tools = composio.tools.get(
             user_id="default",
@@ -97,7 +103,7 @@ def run_agent(user_message: str, tools: list) -> str:
             ]
             return "\n".join(text_parts)
 
-        if response.stop_reason == "tool_use" and tools:
+        if response.stop_reason == "tool_use" and tools and composio:
             # Execute tool calls via Composio and append results
             tool_results = composio.provider.handle_tool_calls(
                 user_id="default", response=response
