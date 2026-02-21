@@ -15,8 +15,12 @@ Usage:
 import os
 from dotenv import load_dotenv
 import anthropic
-from composio_anthropic import AnthropicProvider
-from composio import Composio
+try:
+    from composio_anthropic import AnthropicProvider
+    from composio import Composio
+    COMPOSIO_AVAILABLE = True
+except ImportError:
+    COMPOSIO_AVAILABLE = False
 
 load_dotenv()
 
@@ -41,37 +45,49 @@ QUESTION = (
 
 def main() -> None:
     anthropic_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    composio = Composio(
-        api_key=os.environ["COMPOSIO_API_KEY"],
-        provider=AnthropicProvider(),
-    )
 
-    print("Fetching research tools from Composio...")
-    tools = composio.tools.get(user_id="default", toolkits=["TAVILY"])
-    print(f"Fetched {len(tools)} tool(s)")
+    tools = []
+    composio = None
 
-    print("\nPhilosophy Agent")
+    if COMPOSIO_AVAILABLE:
+        try:
+            composio = Composio(
+                api_key=os.environ["COMPOSIO_API_KEY"],
+                provider=AnthropicProvider(),
+            )
+            print("Fetching research tools from Composio...")
+            tools = composio.tools.get(user_id="default", toolkits=["TAVILY"])
+            print(f"Fetched {len(tools)} tool(s)")
+        except Exception as e:
+            print(f"Composio unavailable ({type(e).__name__}), running without research tools.")
+            tools = []
+            composio = None
+
+    print("\nPhilosophy Agent — Sophia")
     print("=" * 50)
     print(f"Question: {QUESTION}")
     print("=" * 50)
 
     messages = [{"role": "user", "content": QUESTION}]
 
+    create_kwargs: dict = {
+        "model": "claude-opus-4-5",
+        "max_tokens": 4096,
+        "system": SYSTEM_PROMPT,
+        "messages": messages,
+    }
+    if tools:
+        create_kwargs["tools"] = tools
+
     # Agentic loop — continue until the model stops calling tools
     while True:
-        response = anthropic_client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages,
-        )
+        response = anthropic_client.messages.create(**create_kwargs)
 
         messages.append({"role": "assistant", "content": response.content})
 
         tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
-        if tool_use_blocks:
+        if tool_use_blocks and composio:
             print(f"\nUsing {len(tool_use_blocks)} research tool(s)...")
             tool_results = composio.provider.handle_tool_calls(
                 user_id="default", response=response
@@ -82,7 +98,7 @@ def main() -> None:
             final_text = "\n".join(
                 b.text for b in response.content if b.type == "text"
             )
-            print("\nAgent Response:")
+            print("\nSophia's Response:")
             print("-" * 50)
             print(final_text)
             break
